@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MindGrade — Daily 3/2/1/0 Grader</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#10b981;--muted:#98a0b3}
+    *{box-sizing:border-box;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#071024 0%, #081428 60%);color:#e6eef8}
+    .app{min-height:100vh;display:flex;gap:20px;padding:28px}
+    .bg-text{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:0}
+    .bg-text h1{font-size:clamp(48px,12vw,180px);opacity:.06;letter-spacing:6px;margin:0}
+    .sidebar{width:320px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border-radius:12px;padding:18px;z-index:2}
+    .main{flex:1;z-index:2}
+    .card{background:rgba(255,255,255,0.02);padding:14px;border-radius:10px;margin-bottom:14px}
+    h2{margin:0 0 10px 0;font-size:18px}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input[type=text]{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    button{cursor:pointer;padding:8px 12px;border-radius:8px;border:0;background:var(--accent);color:#012;font-weight:600}
+    .user-list{display:flex;flex-direction:column;gap:8px}
+    .user-item{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px;background:rgba(0,0,0,0.18)}
+    .days{display:flex;gap:10px;flex-wrap:wrap}
+    .day-col{flex:1;min-width:120px}
+    .day-header{display:flex;justify-content:space-between;align-items:center}
+    .scores{display:flex;gap:8px;margin-top:8px}
+    .score-btn{flex:1;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent}
+    .score-btn.sel{background:rgba(16,185,129,0.12);border-color:rgba(16,185,129,0.2)}
+    table{width:100%;border-collapse:collapse}
+    td,th{padding:8px;border-bottom:1px dashed rgba(255,255,255,0.03);text-align:left}
+    .tot{font-weight:700}
+    .winner{background:linear-gradient(90deg,#065f46 0%, #10b981 100%);color:#001;padding:8px;border-radius:8px;text-align:center;margin-top:6px}
+    .quote{font-style:italic;color:var(--muted);margin-top:6px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    .small{padding:6px 8px;font-size:13px}
+    .export{background:transparent;border:1px solid rgba(255,255,255,0.06)}
+    footer{margin-top:12px;color:var(--muted);font-size:13px}
+    @media (max-width:900px){.app{flex-direction:column;padding:14px}.sidebar{width:100%}}
+  </style>
+</head>
+<body>
+  <div class="bg-text"><h1>It Is All In The Mind</h1></div>
+  <div class="app">
+    <div class="sidebar card">
+      <h2>Squad</h2>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input id="newName" type="text" placeholder="Add friend (name)" />
+        <button id="addBtn">Add</button>
+      </div>
+      <div class="user-list" id="userList"></div>
+
+      <div class="card" style="margin-top:12px">
+        <label>Week selector</label>
+        <div style="display:flex;gap:8px">
+          <input id="weekDate" type="date" />
+          <button id="setWeek" class="small">Set</button>
+        </div>
+        <div style="margin-top:8px">
+          <label>Start day of week</label>
+          <select id="weekStart">
+            <option value="1">Monday</option>
+            <option value="0">Sunday</option>
+          </select>
+        </div>
+        <div style="margin-top:8px" class="controls">
+          <button id="exportCsv" class="small export">Export CSV</button>
+          <button id="resetWeek" class="small">Reset Week</button>
+        </div>
+      </div>
+      <footer>Tip: Open this file in a browser. Data is stored locally.</footer>
+    </div>
+
+    <div class="main">
+      <div class="card">
+        <h2>Daily Grid — pick 3 / 2 / 1 / 0</h2>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <div>Week: <span id="weekLabel"></span></div>
+          <div style="margin-left:auto">Click a name then select score for the day.</div>
+        </div>
+        <div class="days" id="daysGrid"></div>
+      </div>
+
+      <div class="card">
+        <h2>Leaderboard</h2>
+        <div id="leaderboard"></div>
+      </div>
+
+      <div class="card">
+        <h2>Weekly Results</h2>
+        <div id="weeklyAnnounce"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Simple data model using localStorage
+    const STORAGE_KEY = 'mindgrade_v1'
+    const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+
+    function load(){
+      const raw = localStorage.getItem(STORAGE_KEY)
+      return raw ? JSON.parse(raw) : {users:[], records:{}, settings:{weekStart:1}}
+    }
+    function save(state){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) }
+
+    let state = load()
+    // init DOM refs
+    const userList = document.getElementById('userList')
+    const newName = document.getElementById('newName')
+    const addBtn = document.getElementById('addBtn')
+    const daysGrid = document.getElementById('daysGrid')
+    const leaderboard = document.getElementById('leaderboard')
+    const weeklyAnnounce = document.getElementById('weeklyAnnounce')
+    const weekLabel = document.getElementById('weekLabel')
+    const weekDate = document.getElementById('weekDate')
+    const weekStart = document.getElementById('weekStart')
+    const setWeek = document.getElementById('setWeek')
+    const exportCsv = document.getElementById('exportCsv')
+    const resetWeek = document.getElementById('resetWeek')
+
+    weekStart.value = state.settings.weekStart ?? 1
+    weekStart.addEventListener('change', ()=>{ state.settings.weekStart = Number(weekStart.value); save(state); renderAll() })
+
+    addBtn.onclick = ()=>{
+      const name = newName.value.trim()
+      if(!name) return alert('Give a name, bro')
+      if(state.users.includes(name)) return alert('Already in squad')
+      state.users.push(name)
+      save(state)
+      newName.value=''
+      renderAll()
+    }
+
+    function uidForWeek(date){
+      // get year-week based on ISO week (Mon start) but allow Sunday start via settings
+      const d = new Date(date)
+      const weekStartSetting = state.settings.weekStart ?? 1
+      // shift day to the configured start
+      const day = (d.getDay() + 7 - weekStartSetting)%7
+      const start = new Date(d)
+      start.setDate(d.getDate() - day)
+      start.setHours(0,0,0,0)
+      return start.toISOString().slice(0,10)
+    }
+
+    function getWeekDays(fromDate){
+      const ds = []
+      const base = new Date(fromDate)
+      const weekStartSetting = state.settings.weekStart ?? 1
+      const day = (base.getDay() + 7 - weekStartSetting)%7
+      const start = new Date(base)
+      start.setDate(base.getDate() - day)
+      for(let i=0;i<7;i++){
+        const d = new Date(start); d.setDate(start.getDate()+i)
+        ds.push(d)
+      }
+      return ds
+    }
+
+    // selected user for quick scoring
+    let selectedUser = null
+
+    function renderUsers(){
+      userList.innerHTML = ''
+      state.users.forEach(name=>{
+        const el = document.createElement('div'); el.className='user-item'
+        el.innerHTML = `
+          <div style="display:flex;gap:8px;align-items:center">
+            <div style="width:40px;height:40px;border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));display:flex;align-items:center;justify-content:center;font-weight:700">${name.split(' ').map(s=>s[0]).slice(0,2).join('')}</div>
+            <div>
+              <div style="font-weight:700">${name}</div>
+              <div style="color:var(--muted);font-size:13px">click to select</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="small" onclick="removeUser('${encodeURIComponent(name)}')">Del</button>
+          </div>
+        `
+        el.onclick = ()=>{ selectedUser = name; document.querySelectorAll('.user-item').forEach(n=>n.style.outline=''); el.style.outline='2px solid rgba(16,185,129,0.12)'; }
+        userList.appendChild(el)
+      })
+      window.removeUser = function(nenc){ const n = decodeURIComponent(nenc); if(confirm('Remove '+n+'?')){ state.users = state.users.filter(x=>x!==n); save(state); renderAll() } }
+    }
+
+    function renderDaysGrid(weekKey){
+      daysGrid.innerHTML = ''
+      const days = getWeekDays(new Date(weekKey))
+      days.forEach(d=>{
+        const col = document.createElement('div'); col.className='day-col card'
+        const dayLabel = DAY_NAMES[d.getDay()]+ ' ' + d.toISOString().slice(5,10)
+        col.innerHTML = `<div class="day-header"><strong>${dayLabel}</strong><div style="color:var(--muted);font-size:13px">${d.toDateString()}</div></div>`
+        state.users.forEach(name=>{
+          const userRow = document.createElement('div'); userRow.style.marginTop='8px'
+          const rec = (state.records[weekKey] && state.records[weekKey][name]) ? state.records[weekKey][name][d.toISOString().slice(0,10)] : null
+          userRow.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><div>${name}</div><div class="scores" id="scores-${name}-${d.toISOString().slice(0,10)}"></div></div>`
+          col.appendChild(userRow)
+          const scoresDiv = userRow.querySelector('.scores')
+          [3,2,1,0].forEach(val=>{
+            const b = document.createElement('button'); b.className='score-btn'+(rec===val? ' sel':''); b.textContent=val
+            b.onclick = (ev)=>{ ev.stopPropagation(); if(!selectedUser || selectedUser!==name){ selectedUser = name; // auto-select
+                document.querySelectorAll('.user-item').forEach(n=>n.style.outline=''); Array.from(document.querySelectorAll('.user-item')).find(x=>x.innerText.includes(name))?.style && (Array.from(document.querySelectorAll('.user-item')).find(x=>x.innerText.includes(name)).style.outline='2px solid rgba(16,185,129,0.12)') }
+              setScore(weekKey,name,d.toISOString().slice(0,10),val); renderAll()
+            }
+            scoresDiv.appendChild(b)
+          })
+        })
+        daysGrid.appendChild(col)
+      })
+    }
+
+    function setScore(weekKey,name,dateStr,val){
+      state.records[weekKey] = state.records[weekKey] || {}
+      state.records[weekKey][name] = state.records[weekKey][name] || {}
+      state.records[weekKey][name][dateStr] = val
+      save(state)
+    }
+
+    function computeTotals(weekKey){
+      const rec = state.records[weekKey] || {}
+      const totals = state.users.map(name=>({name, total: Object.values(rec[name]||{}).reduce((a,b)=>a+(Number(b)||0),0)}))
+      totals.sort((a,b)=>b.total-a.total)
+      return totals
+    }
+
+    function renderLeaderboard(weekKey){
+      const totals = computeTotals(weekKey)
+      if(state.users.length===0){ leaderboard.innerHTML='<div style="color:var(--muted)">No users yet.</div>'; return }
+      let html = '<table><tr><th>Name</th><th>Score</th></tr>'
+      totals.forEach((t,i)=>{ html+=`<tr><td>${t.name}${i===0? ' 🏆':''}</td><td class="tot">${t.total}</td></tr>` })
+      html += '</table>'
+      leaderboard.innerHTML = html
+    }
+
+    const WIN_QUOTES = [
+      "Winner energy! Keep flexin' that discipline.",
+      "Top-tier focus — don't let it go to your head."
+    ]
+    const CONSOLATION = {
+      2:["You were close — small tweaks, big gains.","Consistency > intensity."],
+      3:["Keep showing up — that's the whole game.","Pick one tiny habit to improve this week."],
+      4:["It's fine to lose. Learn one thing and try again.","Reset, breathe, restart."]
+    }
+
+    function announceWeekly(weekKey){
+      weeklyAnnounce.innerHTML=''
+      if(state.users.length===0) return weeklyAnnounce.innerHTML='<div style="color:var(--muted)">No users.</div>'
+      const totals = computeTotals(weekKey)
+      if(totals.length===0) return weeklyAnnounce.innerHTML='<div style="color:var(--muted)">No scores yet for the week.</div>'
+      const top = totals[0]
+      const winnerHtml = `<div class="winner">${top.name} wins with ${top.total} pts — GOAT</div>`
+      weeklyAnnounce.innerHTML = winnerHtml
+      // show quotes for ranks 2,3,4
+      for(let i=1;i<Math.min(4,totals.length);i++){
+        const rank = i+1
+        const block = document.createElement('div'); block.className='card'
+        const qarr = CONSOLATION[rank] || ["Keep grinding."]
+        block.innerHTML = `<div style="font-weight:700">#${rank} — ${totals[i].name} (${totals[i].total} pts)</div><div class="quote">"${qarr[Math.floor(Math.random()*qarr.length)]}"</div>`
+        weeklyAnnounce.appendChild(block)
+      }
+    }
+
+    function renderAll(){
+      // current week chosen or today
+      const dateForWeek = weekDate.value ? weekDate.value : (new Date()).toISOString().slice(0,10)
+      const weekKey = uidForWeek(dateForWeek)
+      weekLabel.textContent = weekKey
+      renderUsers()
+      renderDaysGrid(weekKey)
+      renderLeaderboard(weekKey)
+      announceWeekly(weekKey)
+    }
+
+    setWeek.onclick = ()=>{ if(!weekDate.value) return alert('pick a date'); renderAll() }
+    exportCsv.onclick = ()=>{
+      const dateForWeek = weekDate.value ? weekDate.value : (new Date()).toISOString().slice(0,10)
+      const weekKey = uidForWeek(dateForWeek)
+      const days = getWeekDays(new Date(weekKey)).map(d=>d.toISOString().slice(0,10))
+      const rows = []
+      rows.push(['Name', ...days, 'Total'])
+      const rec = state.records[weekKey] || {}
+      state.users.forEach(name=>{
+        const r = [name]
+        let tot=0
+        days.forEach(day=>{ const v = rec[name] && (rec[name][day]!==undefined) ? rec[name][day] : ''; if(v!=='') tot+=Number(v); r.push(v) })
+        r.push(tot)
+        rows.push(r)
+      })
+      const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n')
+      const blob = new Blob([csv],{type:'text/csv'})
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href=url; a.download = `mindgrade_${weekKey}.csv`; a.click(); URL.revokeObjectURL(url)
+    }
+
+    resetWeek.onclick = ()=>{
+      if(!confirm('Reset all scores for this week?')) return
+      const dateForWeek = weekDate.value ? weekDate.value : (new Date()).toISOString().slice(0,10)
+      const weekKey = uidForWeek(dateForWeek)
+      delete state.records[weekKey]
+      save(state)
+      renderAll()
+    }
+
+    // initial render
+    renderAll()
+  </script>
+</body>
+</html>
